@@ -1,0 +1,147 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import linregress
+
+file_path = "rennsli.csv"
+
+df = pd.read_csv(file_path, sep=';')
+
+df["date"] = pd.to_datetime({'year': df['YYYY'], 'month': df['MM'], 'day': df['DD']})
+
+df = df.sort_values("date").reset_index(drop=True)
+
+
+start_date = "1993-10-01"
+end_date = "2023-09-30"
+df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+
+df["qobs"] = pd.to_numeric(df["qobs"], errors="coerce")
+
+df.loc[df["qobs"] < 0, "qobs"] = np.nan
+df = df.dropna(subset=["qobs"]).copy()
+
+print(df.head())
+print(df.tail())
+print(f"Fjöldi mælinga: {len(df)}")
+
+
+def lyne_hollick_pass(Q, alpha=0.925):
+
+    Q = np.asarray(Q, dtype=float)
+    qf = np.zeros_like(Q)
+
+    for i in range(1, len(Q)):
+        qf[i] = alpha * qf[i - 1] + ((1 + alpha) / 2.0) * (Q[i] - Q[i - 1])
+        qf[i] = max(qf[i], 0.0)
+        qf[i] = min(qf[i], Q[i])
+
+    return qf
+
+
+def lyne_hollick_baseflow(Q, alpha=0.925, passes=3):
+
+    Q = np.asarray(Q, dtype=float)
+    work = Q.copy()
+
+    for p in range(passes):
+        if p % 2 == 0:
+            qf = lyne_hollick_pass(work, alpha=alpha)
+            bf = work - qf
+        else:
+            rev = work[::-1]
+            qf = lyne_hollick_pass(rev, alpha=alpha)
+            bf = rev - qf
+            bf = bf[::-1]
+
+        bf = np.clip(bf, 0, Q)
+        work = bf.copy()
+
+    return work
+
+
+Q = df["qobs"].values
+df["baseflow"] = lyne_hollick_baseflow(Q, alpha=0.925, passes=3)
+df["quickflow"] = df["qobs"] - df["baseflow"]
+
+
+# Hér er BFI reiknað fyrir allt tímabilið
+BFI = df["baseflow"].sum() / df["qobs"].sum()
+print(f"BFI fyrir allt tímabilið = {BFI:.3f}")
+
+df["year"] = df["date"].dt.year
+df["decade"] = (df["year"] // 10) * 10
+
+bfi_year = (
+    df.groupby("year")[["qobs", "baseflow"]]
+    .sum()
+    .assign(BFI=lambda x: x["baseflow"] / x["qobs"])
+)
+
+bfi_decade = (
+    df.groupby("decade")[["qobs", "baseflow"]]
+    .sum()
+    .assign(BFI=lambda x: x["baseflow"] / x["qobs"])
+)
+
+print("\nBFI eftir áratug:")
+print(bfi_decade[["BFI"]])
+
+# Hér er recession tímabilið skilgreint og greint
+recession = df[(df["date"] >= "2021-09-10") & (df["date"] <= "2022-01-20")].copy()
+recession = recession.sort_values("date")
+recession = recession[recession["baseflow"] > 0].copy()
+recession["t"] = range(len(recession))
+recession["ln_q"] = np.log(recession["baseflow"])
+
+coef = np.polyfit(recession["t"], recession["ln_q"], 1)
+slope, intercept = coef
+
+K_power = np.exp(slope)
+
+print("Hallatala:", slope)
+print("K í q_t = q0 * K^t :", K_power)
+
+
+recession["fit_ln_q"] = intercept + slope * recession["t"]
+
+
+subset = df[(df["date"] >= "2020-01-01") & (df["date"] <= "2023-12-31")]
+
+#Baseflow seperation
+plt.figure(figsize=(14, 5))
+plt.plot(subset["date"], subset["qobs"], label="Heildarrennsli")
+plt.plot(subset["date"], subset["baseflow"], label="Baseflow")
+plt.legend()
+plt.xlabel("Dagsetning")
+plt.ylabel("Rennsli [m^3/s]")
+plt.title(f"Baseflow separation fyrir árin 2021-2023")
+plt.tight_layout()
+plt.show()
+
+# BFI eftir áratug
+plt.figure(figsize=(10, 5))
+plt.plot(bfi_decade.index, bfi_decade["BFI"], marker="o")
+plt.xlabel("Áratugur")
+plt.ylabel("BFI")
+plt.title("BFI eftir áratug")
+plt.title(f"Baseflow separation, BFI = {BFI:.3f}")
+plt.tight_layout()
+plt.show()
+
+#Recession
+plt.figure(figsize=(8,5))
+plt.plot(recession["t"], recession["ln_q"], "o-", label="ln(baseflow)")
+plt.plot(recession["t"], recession["fit_ln_q"], label="Aðhvarfslína")
+plt.xlabel("Tími [dagar]")
+plt.ylabel("ln(Q)")
+plt.title("Recession analysis")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+
+df.to_csv("baseflow_results.csv", index=False)
+bfi_year.to_csv("bfi_by_year.csv")
+bfi_decade.to_csv("bfi_by_decade.csv")
+print("\nBúið að vista niðurstöður.")
