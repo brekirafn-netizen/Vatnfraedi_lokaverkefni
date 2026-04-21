@@ -1,0 +1,133 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import gumbel_r, lognorm, pearson3
+
+# --- LESA GÖGN ---
+df = pd.read_csv("rennsli.csv", sep=";")
+
+# breyta í tölur
+df["qobs"] = pd.to_numeric(df["qobs"], errors="coerce")
+
+# búa til dagsetningu
+df["date"] = pd.to_datetime({
+    "year": df["YYYY"],
+    "month": df["MM"],
+    "day": df["DD"]
+})
+
+df["year"] = df["date"].dt.year
+
+# ANNUAL PEAK FLOWS 
+annual_max = df.groupby("year")["qobs"].max().dropna()
+
+#  GUMBEL
+params_g = gumbel_r.fit(annual_max)
+
+Q10_g = gumbel_r.ppf(0.9, *params_g)
+Q50_g = gumbel_r.ppf(0.5, *params_g)
+Q100_g = gumbel_r.ppf(0.99, *params_g)
+
+# Bootstrap CI
+boot_g = []
+for _ in range(1000):
+    sample = np.random.choice(annual_max, size=len(annual_max), replace=True)
+    p = gumbel_r.fit(sample)
+    boot_g.append(gumbel_r.ppf(0.99, *p))
+
+ci_g = np.percentile(boot_g, [5, 95])
+
+
+#  LOG NORMAL 3
+params_ln = lognorm.fit(annual_max)
+
+Q10_ln = lognorm.ppf(0.9, *params_ln)
+Q50_ln = lognorm.ppf(0.5, *params_ln)
+Q100_ln = lognorm.ppf(0.99, *params_ln)
+
+boot_ln = []
+for _ in range(1000):
+    sample = np.random.choice(annual_max, size=len(annual_max), replace=True)
+    p = lognorm.fit(sample)
+    boot_ln.append(lognorm.ppf(0.99, *p))
+
+ci_ln = np.percentile(boot_ln, [5, 95])
+
+#  LOG PEARSON 3
+log_data = np.log(annual_max)
+
+params_lp = pearson3.fit(log_data)
+
+Q10_lp = np.exp(pearson3.ppf(0.9, *params_lp))
+Q50_lp = np.exp(pearson3.ppf(0.5, *params_lp))
+Q100_lp = np.exp(pearson3.ppf(0.99, *params_lp))
+
+boot_lp = []
+for _ in range(1000):
+    sample = np.random.choice(annual_max, size=len(annual_max), replace=True)
+    log_sample = np.log(sample)
+    p = pearson3.fit(log_sample)
+    boot_lp.append(np.exp(pearson3.ppf(0.99, *p)))
+
+ci_lp = np.percentile(boot_lp, [5, 95])
+
+#  PRINTA NIÐURSTÖÐUR
+
+print("=== GUMBEL ===")
+print("Q10 =", Q10_g)
+print("Q50 =", Q50_g)
+print("Q100 =", Q100_g)
+print("90% CI =", ci_g)
+
+print("\n=== LOG NORMAL 3 ===")
+print("Q10 =", Q10_ln)
+print("Q50 =", Q50_ln)
+print("Q100 =", Q100_ln)
+print("90% CI =", ci_ln)
+
+print("\n=== LOG PEARSON 3 ===")
+print("Q10 =", Q10_lp)
+print("Q50 =", Q50_lp)
+print("Q100 =", Q100_lp)
+print("90% CI =", ci_lp)
+
+# --- LESA GÖGN ---
+df = pd.read_csv("rennsli.csv", sep=";")
+
+# breyta í tölur
+df["qobs"] = pd.to_numeric(df["qobs"], errors="coerce")
+
+# búa til dagsetningu
+df["date"] = pd.to_datetime({
+    "year": df["YYYY"],
+    "month": df["MM"],
+    "day": df["DD"]
+}, errors="coerce")
+
+# búa til year dálk
+df["year"] = df["date"].dt.year
+
+# taka út línur með vöntun
+df = df.dropna(subset=["year", "qobs"]).copy()
+
+# ANNUAL PEAKS
+annual_max = df.groupby("year")["qobs"].max().reset_index()
+
+# RAÐA FRÁ STÆRSTA TIL MINNSTA 
+annual_sorted = annual_max.sort_values(by="qobs", ascending=False).reset_index(drop=True)
+
+# GRINGORTEN 
+n = len(annual_sorted)
+i = np.arange(1, n + 1)
+
+P_exceed = (i - 0.44) / (n + 0.12)
+T_return = 1 / P_exceed
+
+# GERA DATAFRAME 
+gringorten_df = pd.DataFrame({
+    "rank": i,
+    "Q": annual_sorted["qobs"],
+    "P_exceed": P_exceed,
+    "T_return": T_return
+})
+
+print(gringorten_df.head())
