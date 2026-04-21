@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from scipy.stats import gumbel_r, lognorm, pearson3
 
-# --- LESA GÖGN ---
+# LESA GÖGN 
 df = pd.read_csv("rennsli.csv", sep=";")
 
 # breyta í tölur
