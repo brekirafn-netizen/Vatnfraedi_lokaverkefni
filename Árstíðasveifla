@@ -1,0 +1,76 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+
+#Hitastig
+start_date = "1993-10-01"
+end_date = "2023-09-30"
+
+df = pd.read_csv("vedur.csv", sep=';') 
+df['Date'] = pd.to_datetime({'year': df['YYYY'], 'month': df['MM'], 'day': df['DD']})
+
+df_filtered = df[(df["Date"] >= start_date) & (df["Date"] <= end_date)].copy()
+
+df_filtered['month'] = df_filtered['Date'].dt.month
+
+temp_clim = df_filtered.groupby('month')['2m_temp_mean'].mean()
+print(temp_clim)
+
+plt.figure(figsize=(8,5))
+plt.plot(temp_clim.index, temp_clim.values, marker='o')
+plt.xticks(range(1,13), ['Jan','Feb','Mar','Apr','Maí','Jún','Júl','Ágú','Sep','Okt','Nóv','Des'])
+plt.xlabel('Mánuður')
+plt.ylabel('Hiti (°C)')
+plt.title('Meðaltalsár hitastigs')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+#Rennsli
+qdf = pd.read_csv("rennsli.csv", sep=';') 
+
+qdf["Date"] = pd.to_datetime({
+    "year": qdf["YYYY"],
+    "month": qdf["MM"],
+    "day": qdf["DD"]
+})
+
+
+start_date = "1993-10-01"
+end_date = "2023-09-30"
+qdf = qdf[(qdf["Date"] >= start_date) & (qdf["Date"] <= end_date)].copy()
+
+qdf["month"] = qdf["Date"].dt.month
+
+flow_clim = qdf.groupby("month")["qobs"].mean()
+print(flow_clim)
+
+plt.figure(figsize=(8,5))
+plt.plot(flow_clim.index, flow_clim.values, marker="o")
+plt.xticks(range(1,13), ['Jan','Feb','Mar','Apr','Maí','Jún','Júl','Ágú','Sep','Okt','Nóv','Des'])
+plt.xlabel("Mánuður")
+plt.ylabel("Rennsli (m³/s)")
+plt.title("Meðaltalsár rennslis")
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+#Úrkoma
+
+precip_df = pd.read_csv("vedur.csv", sep=';')
+precip_df['Date'] = pd.to_datetime({'year': precip_df['YYYY'], 'month': precip_df['MM'], 'day': precip_df['DD']})
+precip_df['month'] = precip_df['Date'].dt.month
+
+
+precip_clim = precip_df.groupby('month')['prec_carra'].mean()
+print(precip_clim)
+
+
+plt.figure(figsize=(8,5))
+plt.bar(precip_clim.index, precip_clim.values) 
+plt.xticks(range(1,13), ['Jan','Feb','Mar','Apr','Maí','Jún','Júl','Ágú','Sep','Okt','Nóv','Des'])
+plt.xlabel('Mánuður')
+plt.ylabel('Úrkoma (mm)')
+plt.title('Meðaldagleg úrkoma')
+plt.grid(axis='y') 
+plt.tight_layout()
+plt.show()
