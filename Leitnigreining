@@ -1,0 +1,145 @@
+!pip install pymannkendall
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.stats import theilslopes
+import pymannkendall as mk
+
+df = pd.read_csv("rennsli.csv", sep=';')
+df["date"] = pd.to_datetime({'year': df['YYYY'], 'month': df['MM'], 'day': df['DD']})
+df = df.sort_values("date").reset_index(drop=True)
+
+
+start_date = "1993-10-01"
+end_date = "2023-09-30"
+df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+
+def season_from_month(month):
+    if month in [12, 1, 2]:
+        return "Vetur"
+    elif month in [3, 4, 5]:
+        return "Vor"
+    elif month in [6, 7, 8]:
+        return "Sumar"
+    else:
+        return "Haust"
+
+df["month"] = df["date"].dt.month
+df["season"] = df["month"].apply(season_from_month)
+
+df["year"] = df["date"].dt.year
+df["season_year"] = df["year"]
+df.loc[df["month"] == 12, "season_year"] = df.loc[df["month"] == 12, "year"] + 1
+
+annual = df.groupby("year", as_index=False)["qobs"].mean()
+annual.columns = ["year", "Q_mean"]
+
+seasonal = (
+    df.groupby(["season_year", "season"], as_index=False)["qobs"]
+    .mean()
+)
+seasonal.columns = ["year", "season", "Q_mean"]
+
+# Árleg leitnigreining 
+x_annual = annual["year"].values
+y_annual = annual["Q_mean"].values
+sen_annual = theilslopes(y_annual, x_annual, 0.95)
+mk_annual = mk.hamed_rao_modification_test(y_annual)
+
+plt.figure(figsize=(8, 5))
+plt.plot(annual["year"], annual["Q_mean"], "o-", label="Árlegt meðalrennsli")
+plt.plot(annual["year"], sen_annual.intercept + sen_annual.slope * annual["year"],
+         label="Theil–Sen leitnilína")
+
+plt.xlabel("Ár")
+plt.ylabel("Rennsli (m³/s)")
+plt.title("Leitni í árlegu meðalrennsli")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+results = []
+
+results.append({
+    "Tímabil": "Árlegt",
+    "Sen_slope": sen_annual.slope,
+    "Sen_low": sen_annual.low_slope,
+    "Sen_high": sen_annual.high_slope,
+    "p_gildi": mk_annual.p,
+    "Tau": mk_annual.Tau,
+    "Leitni": mk_annual.trend,
+    "Marktækt": "Já" if mk_annual.p < 0.05 else "Nei",
+    "z_gildi": mk_annual.z
+})
+
+# Árstíðabundin leitnigreining
+for season_name in ["Vetur", "Vor", "Sumar", "Haust"]:
+    sub = seasonal[seasonal["season"] == season_name].dropna()
+
+    x = sub["year"].values
+    y = sub["Q_mean"].values
+
+    if len(sub) < 5:
+        continue
+
+    sen = theilslopes(y, x, 0.95)
+    mk_result = mk.hamed_rao_modification_test(y)
+
+    results.append({
+        "Tímabil": season_name,
+        "Sen_slope": sen.slope,
+        "Sen_low": sen.low_slope,
+        "Sen_high": sen.high_slope,
+        "p_gildi": mk_result.p,
+        "Tau": mk_result.Tau,
+        "Leitni": mk_result.trend,
+        "Marktækt": "Já" if mk_result.p < 0.05 else "Nei",
+        "z_gildi": mk_result.z
+    })
+
+results_df = pd.DataFrame(results)
+
+
+plt.figure(figsize=(12, 7))
+for season_name in ["Vetur", "Vor", "Sumar", "Haust"]:
+    sub = seasonal[seasonal["season"] == season_name].dropna()
+    x = sub["year"].values
+    y = sub["Q_mean"].values
+    sen = theilslopes(y, x, 0.95)
+
+    plt.plot(x, y, 'o-', label=f'Meðalrennsli {season_name}') # Changed 'o' to 'o-'
+    plt.plot(x, sen.intercept + sen.slope * x, '-', label=f'Theil–Sen {season_name} leitnilína')
+
+plt.xlabel("Ár")
+plt.ylabel("Rennsli (m³/s)")
+plt.title("Leitni í árstíðabundnu meðalrennsli (allir árstíðir)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+
+seasons = seasonal["season"].unique()
+fig, axes = plt.subplots(nrows=len(seasons), ncols=1, figsize=(10, 5 * len(seasons)))
+
+for ax, season_name in zip(axes, seasons):
+    sub = seasonal[seasonal["season"] == season_name].dropna()
+
+    x = sub["year"].values
+    y = sub["Q_mean"].values
+
+    sen = theilslopes(y, x, 0.95)
+
+    ax.plot(x, y, "o-", label=f"{season_name}")
+    ax.plot(x, sen.intercept + sen.slope * x, "-", label="Theil–Sen leitnilína")
+
+    ax.set_title(season_name)
+    ax.set_xlabel("Ár")
+    ax.set_ylabel("Rennsli (m³/s)")
+    ax.grid(True)
+    ax.legend()
+
+plt.suptitle("Leitni í árstíðabundnu meðalrennsli", fontsize=16)
+plt.tight_layout()
+plt.show()
