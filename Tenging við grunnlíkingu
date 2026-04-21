@@ -1,0 +1,126 @@
+import pandas as pd
+import numpy as np
+
+# =========================
+# 1. LESA GÖGN
+# =========================
+met_file = "vedur.csv"
+qobs_file = "rennsli.csv"
+
+# Veður-/vatnafræðigögn
+if met_file.endswith(".xlsx"):
+    df_m = pd.read_excel(met_file)
+elif met_file.endswith(".csv"):
+    df_m = pd.read_csv(met_file, sep=";")
+else:
+    raise ValueError(f"Óstudd skráartegund fyrir met_file: {met_file}")
+
+# Rennslisgögn
+df_q = pd.read_csv(qobs_file, sep=";")
+
+# =========================
+# 2. BÚA TIL DAGSETNINGU
+# =========================
+df_m["date"] = pd.to_datetime(
+    dict(year=df_m["YYYY"], month=df_m["MM"], day=df_m["DD"]),
+    errors="coerce"
+)
+
+df_q["date"] = pd.to_datetime(
+    dict(year=df_q["YYYY"], month=df_q["MM"], day=df_q["DD"]),
+    errors="coerce"
+)
+
+# =========================
+# 3. SÍA TÍMABIL
+# =========================
+# Ef þú vilt sía tímabil, taktu myllumerkin af hér:
+start = "1993-10-01"
+end   = "2023-09-30"
+df_m = df_m[(df_m["date"] >= start) & (df_m["date"] <= end)].copy()
+df_q = df_q[(df_q["date"] >= start) & (df_q["date"] <= end)].copy()
+
+# =========================
+# 4. TRYGGJA TÖLUR
+# =========================
+met_cols = ["2m_temp_mean", "total_et_carra", "prec_carra"]
+for col in met_cols:
+    df_m[col] = pd.to_numeric(df_m[col], errors="coerce")
+
+df_q["qobs"] = pd.to_numeric(df_q["qobs"], errors="coerce")
+
+# =========================
+# 5. EINGAR / SKÖLUN
+# =========================
+P_raw = df_m["prec_carra"].mean(skipna=True)
+ET_raw = df_m["total_et_carra"].mean(skipna=True)
+
+prec_scale = 1000 if P_raw > 100 else 1
+et_scale = 1000 if abs(ET_raw) > 10 else 1
+
+df_m["P_mm_day"] = df_m["prec_carra"] / prec_scale
+df_m["ET_mm_day"] = df_m["total_et_carra"] / et_scale
+
+# Ef ET er geymt neikvætt, notum jákvæða stærð
+df_m["ET_mm_day"] = df_m["ET_mm_day"].abs()
+
+# =========================
+# 6. REIKNA MEÐALTÖL
+# =========================
+mean_T = df_m["2m_temp_mean"].mean(skipna=True)
+mean_P_day = df_m["P_mm_day"].mean(skipna=True)
+mean_ET_day = df_m["ET_mm_day"].mean(skipna=True)
+mean_Q_m3s = df_q["qobs"].mean(skipna=True)
+
+# =========================
+# 7. UMBREYTA Q Í mm/dag
+# =========================
+A_km2 = 5150
+A_m2 = A_km2 * 1e6
+
+mean_Q_mm_day = (mean_Q_m3s * 86400 / A_m2) * 1000
+
+# =========================
+# 8. VATNSJAFNVÆGI
+# =========================
+delta_S = mean_P_day - mean_Q_mm_day - mean_ET_day
+
+# =========================
+# 9. PRÓFANIR / ÚTTAK
+# =========================
+print("Fjöldi daga í df_m:", len(df_m))
+print("Fjöldi daga í df_q:", len(df_q))
+print()
+
+print("Mean T (°C):", round(mean_T, 2))
+print("Mean P (mm/day):", round(mean_P_day, 3))
+print("Mean ET (mm/day):", round(mean_ET_day, 3))
+print("Mean Q (m³/s):", round(mean_Q_m3s, 2))
+print("Mean Q (mm/day):", round(mean_Q_mm_day, 3))
+print("Delta S (mm/day):", round(delta_S, 3))
+print()
+
+print("Skölun notuð:")
+print("prec_carra deilt með:", prec_scale)
+print("total_et_carra deilt með:", et_scale)
+
+# =========================
+# 10. DAGLEGT vs ÁRLEGT
+# =========================
+annual_P = mean_P_day * 365.25
+annual_ET = mean_ET_day * 365.25
+annual_Q = mean_Q_mm_day * 365.25
+annual_dS = delta_S * 365.25
+
+print()
+print("Árlegt meðaltal:")
+print("P (mm/ár):", round(annual_P, 1))
+print("ET (mm/ár):", round(annual_ET, 1))
+print("Q (mm/ár):", round(annual_Q, 1))
+print("Delta S (mm/ár):", round(annual_dS, 1))
+
+for A_km2 in [5150, 5200, 5250, 5300, 5350]:
+    A_m2 = A_km2 * 1e6
+    Q_mm_day = (mean_Q_m3s * 86400 / A_m2) * 1000
+    delta_S = mean_P_day - Q_mm_day - mean_ET_day
+    print(A_km2, "km²  ->  ΔS (mm/ár) =", round(delta_S * 365.25, 1))
