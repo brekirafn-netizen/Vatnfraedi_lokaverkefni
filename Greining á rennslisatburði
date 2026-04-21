@@ -1,0 +1,226 @@
+from google.colab import files
+uploaded = files.upload()
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+# LESA RENNSLISGÖGN
+df = pd.read_csv("rennsli.csv", sep=";")
+
+# tryggja tölur
+df["qobs"] = pd.to_numeric(df["qobs"], errors="coerce")
+
+# búa til dagsetningu
+df["date"] = pd.to_datetime({
+    "year": df["YYYY"],
+    "month": df["MM"],
+    "day": df["DD"]
+})
+
+# LESA VEÐURGÖGN (DF_M)
+met_file = "vedur.csv"
+
+df_m = pd.read_csv(met_file, sep=";")
+
+df_m["date"] = pd.to_datetime({
+    "year": df_m["YYYY"],
+    "month": df_m["MM"],
+    "day": df_m["DD"]
+}, errors="coerce")
+
+for col in ["2m_temp_mean", "total_et_carra", "prec_carra"]:
+    df_m[col] = pd.to_numeric(df_m[col], errors="coerce")
+
+# Reikna P_mm_day (eins og gert í lið 4 kóða efri)
+P_raw = df_m["prec_carra"].mean(skipna=True)
+prec_scale = 1000 if P_raw > 100 else 1
+df_m["P_mm_day"] = df_m["prec_carra"] / prec_scale
+
+
+# SÍA RÉTT TÍMABIL
+start_date = pd.Timestamp("1993-10-01")
+end_date = pd.Timestamp("2023-09-30")
+
+df = df[(df["date"] >= start_date) & (df["date"] <= end_date)].copy()
+df_m = df_m[(df_m["date"] >= start_date) & (df_m["date"] <= end_date)].copy()
+
+# BÚA TIL VATNAÁR
+df["water_year"] = np.where(df["date"].dt.month >= 10,
+                            df["date"].dt.year + 1,
+                            df["date"].dt.year)
+
+
+# FINNA ANNUAL PEAK FLOWS
+annual_max = df.loc[df.groupby("water_year")["qobs"].idxmax(),
+                    ["date", "water_year", "qobs"]].copy()
+
+print("Annual peak flows:")
+print(annual_max.head())
+
+
+# FINNA 10 STÆRSTU FLOÐIN
+
+top_events = annual_max.sort_values("qobs", ascending=False).head(10)
+
+print("\nTop 10 flood events:")
+print(top_events)
+
+
+# VELJA ATBURÐ TIL AÐ SKOÐA
+event_index = 1
+
+peak_date = top_events.iloc[event_index]["date"]
+peak_q = top_events.iloc[event_index]["qobs"]
+peak_water_year = top_events.iloc[event_index]["water_year"]
+
+print("\nValinn atburður:")
+print("Vatnaár:", peak_water_year)
+print("Dagsetning topps:", peak_date.date())
+print("Qmax:", peak_q)
+
+
+# TAKA 10 DAGA FYRIR OG EFTIR
+
+window = df[(df["date"] >= peak_date - pd.Timedelta(days=10)) &
+            (df["date"] <= peak_date + pd.Timedelta(days=10))].copy()
+
+# Sameina window gögn við df_m til að fá T og P
+window_merged = pd.merge(window, df_m[["date", "2m_temp_mean", "P_mm_day"]], on="date", how="left")
+
+print("\nGögn í glugga:")
+print(window_merged[["date", "qobs", "2m_temp_mean", "P_mm_day"]])
+
+
+# REIKNA TIME-TO-PEAK
+pre_peak = window_merged[window_merged["date"] <= peak_date].copy()
+
+start_idx = pre_peak["qobs"].idxmin()
+event_start_date = pre_peak.loc[start_idx, "date"]
+q_start = pre_peak.loc[start_idx, "qobs"]
+
+q_peak = window_merged.loc[window_merged["qobs"].idxmax(), "qobs"]
+
+time_to_peak = (peak_date - event_start_date).days
+
+print("\nTime-to-peak upplýsingar:")
+print("Upphaf atburðar:", event_start_date.date(), q_start)
+print("Qmax:", peak_date.date(), q_peak)
+print("Time-to-peak:", time_to_peak, "dagar")
+
+# REIKNA RECESSION TIME
+post_peak = window_merged[window_merged["date"] >= peak_date].copy()
+after = post_peak[post_peak["qobs"] <= q_start]
+
+if len(after) > 0:
+    event_end_date = after.iloc[0]["date"]
+    recession_time = (event_end_date - peak_date).days
+    recession_text = f"{recession_time} dagar"
+    print("\nRecession upplýsingar:")
+    print("Endar um:", event_end_date.date())
+    print("Recession time:", recession_time, "dagar")
+else:
+    event_end_date = None
+    recession_time = None
+    recession_text = "> 10 dagar"
+    print("\nRecession upplýsingar:")
+    print("Rennsli nær ekki niður í upphafsgildi innan gluggans.")
+
+
+# REIKNA EXCESS RAIN RELEASE TIME
+P_threshold = 0.5
+
+significant_P_days = window_merged[window_merged["P_mm_day"] >= P_threshold]
+
+if not significant_P_days.empty:
+    last_significant_P_date = significant_P_days["date"].max()
+    post_last_P = window_merged[window_merged["date"] >= last_significant_P_date].copy()
+    after_last_P_q_start = post_last_P[post_last_P["qobs"] <= q_start]
+
+    if not after_last_P_q_start.empty:
+        excess_release_end_date = after_last_P_q_start.iloc[0]["date"]
+        excess_rain_release_time = (excess_release_end_date - last_significant_P_date).days
+        excess_rain_release_text = f"{excess_rain_release_time} dagar"
+        print("\nExcess Rain Release Time upplýsingar:")
+        print("Síðasti marktæki úrkomudagur:", last_significant_P_date.date())
+        print("Rennsli nær upphafsgildi:", excess_release_end_date.date())
+        print("Excess Rain Release Time:", excess_rain_release_time, "dagar")
+    else:
+        excess_rain_release_time = None
+        excess_rain_release_text = "> 10 dagar"
+        print("\nExcess Rain Release Time upplýsingar:")
+        print("Rennsli nær ekki upphafsgildi eftir síðustu marktæku úrkomu innan gluggans.")
+else:
+    excess_rain_release_time = None
+    excess_rain_release_text = "Engin marktæk úrkoma í glugganum"
+    print("\nExcess Rain Release Time upplýsingar:")
+    print("Engin marktæk úrkoma (P > 0.5 mm/dag) fannst í glugganum.")
+
+
+# TEIKNA VATNSRIT MEÐ T OG P
+fig, ax1 = plt.subplots(figsize=(12, 6))
+
+# Plot Q á vinstri ás
+ax1.plot(window_merged["date"], window_merged["qobs"], label="Rennsli (Q)", color="blue")
+ax1.axvline(peak_date, linestyle="--", color="gray", label="Qmax")
+ax1.axvline(event_start_date, linestyle=":", color="gray", label="Upphaf atburðar")
+ax1.set_xlabel("Dagsetning")
+ax1.set_ylabel("Rennsli (m³/s)", color="blue")
+ax1.tick_params(axis="y", labelcolor="blue")
+
+# Búa til annan ás fyrir T
+ax2 = ax1.twinx()
+ax2.plot(window_merged["date"], window_merged["2m_temp_mean"], label="Meðalhitastig (T)", color="red", linestyle="-")
+ax2.set_ylabel("Hitastig (°C)", color="red")
+ax2.tick_params(axis="y", labelcolor="red")
+
+# Búa til þriðja ás fyrir P (súlurit)
+ax3 = ax1.twinx()
+# Offset right y-axis for ax3
+ax3.spines["right"].set_position(("outward", 60))
+ax3.bar(window_merged["date"], window_merged["P_mm_day"], width=0.8, alpha=0.3, color="green", label="Úrkoma (P)")
+ax3.set_ylabel("Úrkoma (mm/dag)", color="green")
+ax3.tick_params(axis="y", labelcolor="green")
+
+# Bæta við time-to-peak merki
+y_annotate_pos_ttp = ax1.get_ylim()[1] * 0.7
+ax1.annotate('', xy=(peak_date, y_annotate_pos_ttp), xytext=(event_start_date, y_annotate_pos_ttp),
+             arrowprops=dict(arrowstyle='<->', color='black', lw=1.5))
+ax1.text(event_start_date + (peak_date - event_start_date) / 2, y_annotate_pos_ttp * 1.02,
+         f'Time-to-peak: {time_to_peak} dagar',
+         horizontalalignment='center', verticalalignment='bottom',
+         bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="black", lw=0.5, alpha=0.8))
+
+# Bæta við recession time merki
+if event_end_date is not None:
+    y_annotate_pos_rec = ax1.get_ylim()[1] * 0.8
+    ax1.annotate('', xy=(event_end_date, y_annotate_pos_rec), xytext=(peak_date, y_annotate_pos_rec),
+                 arrowprops=dict(arrowstyle='<->', color='purple', lw=1.5))
+    ax1.text(peak_date + (event_end_date - peak_date) / 2, y_annotate_pos_rec * 1.02,
+             f'Recession time: {recession_text}',
+             horizontalalignment='center', verticalalignment='bottom',
+             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="purple", lw=0.5, alpha=0.8))
+
+
+
+# Sameina skýringar
+lines, labels = ax1.get_legend_handles_labels()
+lines2, labels2 = ax2.get_legend_handles_labels()
+lines3, labels3 = ax3.get_legend_handles_labels()
+ax3.legend(lines + lines2 + lines3, labels + labels2 + labels3, loc="upper right")
+
+ax1.set_title(f"Flóðatburður, toppur {peak_date.date()} með T og P")
+ax1.grid(alpha=0.3)
+fig.autofmt_xdate()
+plt.show()
+
+# PRNTA NIÐURSTÖÐUR FYRIR SKÝRSLU
+print("\n--- NIÐURSTÖÐUR FYRIR LIÐ 8 ---")
+print("Valinn atburður:", peak_date.date())
+print("Qmax =", round(q_peak, 1), "m3/s")
+print("Upphaf atburðar:", event_start_date.date())
+print("Q við upphaf =", round(q_start, 1), "m3/s")
+print("Time-to-peak =", time_to_peak, "dagar")
+print("Recession time =", recession_text)
+print("Excess rain release time =", excess_rain_release_text)
