@@ -1,0 +1,33 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+# tryggja að qobs sé tala
+df["qobs"] = pd.to_numeric(df["qobs"], errors="coerce")
+
+Q = df["qobs"].dropna()
+
+# 🔹 percentiles
+Q5 = np.percentile(Q, 95)
+Q50 = np.percentile(Q, 50)
+Q95 = np.percentile(Q, 5)
+
+print("Q5 =", round(Q5, 1))
+print("Q50 =", round(Q50, 1))
+print("Q95 =", round(Q95, 1))
+
+# 🔹 langæislína
+Q_sorted = np.sort(Q)[::-1]
+n = len(Q_sorted)
+exceedance = np.arange(1, n+1) / (n+1)
+
+plt.figure(figsize=(8,5))
+plt.plot(exceedance * 100, Q_sorted)
+
+# merkja punktana
+plt.scatter([5, 50, 95], [Q5, Q50, Q95], color="red")
+
+plt.xlabel("Yfirferðarhlutfall (e. exceedance) (%)")
+plt.ylabel("Rennsli (m³/s)")
+plt.title("Langæislína rennslis (1993–2023)")
+plt.grid(alpha=0.3)
+plt.show()
