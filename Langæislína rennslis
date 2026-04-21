@@ -6,7 +6,7 @@ df["qobs"] = pd.to_numeric(df["qobs"], errors="coerce")
 
 Q = df["qobs"].dropna()
 
-# 🔹 percentiles
+# percentiles
 Q5 = np.percentile(Q, 95)
 Q50 = np.percentile(Q, 50)
 Q95 = np.percentile(Q, 5)
@@ -15,7 +15,7 @@ print("Q5 =", round(Q5, 1))
 print("Q50 =", round(Q50, 1))
 print("Q95 =", round(Q95, 1))
 
-# 🔹 langæislína
+# langæislína
 Q_sorted = np.sort(Q)[::-1]
 n = len(Q_sorted)
 exceedance = np.arange(1, n+1) / (n+1)
